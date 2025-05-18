@@ -43,7 +43,15 @@ type LedBlockWorker interface {
 
 type Slicer interface {
 	IterateSlices() iter.Seq2[uint8, []byte]
+	IterateColors() iter.Seq2[Index, Color]
+	Overwrite(iterator iter.Seq2[uint8, []byte]) error
 }
 
 type Frame func(LayoutWorker) // Single frame of a light show
 type LightShow []Frame        // Collection of light show frames
+
+type Index struct {
+	X uint8 // Row
+	Y uint8 // Column
+	Z uint8 // Layer
+}
