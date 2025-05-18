@@ -6,6 +6,13 @@ import (
 	"github.com/Tariomka/led-common-lib/pkg/common"
 )
 
+const (
+	layerCount        = uint8(8)
+	colorCount        = uint8(3)
+	baseLedCount      = uint8(8) // The count of leds in a row/column. Row and Column count is the same
+	bytesInLayerCount = colorCount * baseLedCount
+)
+
 // LedLayout is a state representation of all led colors of the cube.
 //
 // There are 8 layers, each having 64 leds, each having 3 contacts (GBR),
@@ -19,11 +26,11 @@ import (
 // First byte in a color block controlls the back side of the layer, last (8'th) byte - the front.
 // Bits from right to left control each led from right to left led,
 // i.e. 0b00000001 turns on the right most led, 0b10000000 - left most led.
-type LedLayout [8][24]byte
+type LedLayout [layerCount][bytesInLayerCount]byte
 
 func (this *LedLayout) IterateSlices() iter.Seq2[uint8, []byte] {
-	return func(yield func(i uint8, v []byte) bool) {
-		for zAxis := uint8(0); zAxis < 8; zAxis++ {
+	return func(yield func(uint8, []byte) bool) {
+		for zAxis := range layerCount {
 			if !yield(zAxis, this[zAxis][:]) {
 				return
 			}
@@ -33,9 +40,9 @@ func (this *LedLayout) IterateSlices() iter.Seq2[uint8, []byte] {
 
 func (this *LedLayout) IterateColors() iter.Seq2[Index, Color] {
 	return func(yield func(Index, Color) bool) {
-		for zAxis := range uint8(8) {
-			for yAxis := range uint8(8) {
-				for xAxis := range uint8(8) {
+		for zAxis := range layerCount {
+			for yAxis := range baseLedCount {
+				for xAxis := range baseLedCount {
 					if !yield(
 						Index{X: xAxis, Y: yAxis, Z: zAxis},
 						this.getColor(xAxis, yAxis, zAxis)) {
@@ -49,15 +56,15 @@ func (this *LedLayout) IterateColors() iter.Seq2[Index, Color] {
 
 func (this *LedLayout) Overwrite(iterator iter.Seq2[uint8, []byte]) error {
 	for index, layer := range iterator {
-		if index >= 8 {
+		if index >= baseLedCount {
 			return nil
 		}
 
-		if len(layer) < 24 {
+		if len(layer) < int(bytesInLayerCount) {
 			return common.ErrNotEnoughData
 		}
 
-		this[index] = [24]byte(layer)
+		this[index] = [bytesInLayerCount]byte(layer)
 	}
 	return nil
 }
@@ -247,26 +254,23 @@ func (this *LedLayout) resetByte(y, z uint8, value byte) {
 }
 
 func (this *LedLayout) setBytes(z uint8, c Color) {
-	size := uint8(len(this))
 	for _, offset := range layoutOffsetIndex(0, c) {
-		for index := offset; index < offset+size; index++ {
+		for index := offset; index < offset+baseLedCount; index++ {
 			this.mutateByteWithOr(index, z, all)
 		}
 	}
 }
 
 func (this *LedLayout) resetBytes(z uint8) {
-	size := uint8(len(this[z]))
-	for index := uint8(0); index < size; index++ {
+	for index := range bytesInLayerCount {
 		this.mutateByteWithAnd(index, z, none)
 	}
 }
 
 func (this *LedLayout) setAll(c Color) {
-	size := uint8(len(this))
-	for layer := uint8(0); layer < size; layer++ {
+	for layer := range layerCount {
 		for _, offset := range layoutOffsetIndex(0, c) {
-			for index := offset; index < offset+size; index++ {
+			for index := offset; index < offset+baseLedCount; index++ {
 				this.mutateByteWithOr(index, layer, all)
 			}
 		}
@@ -274,9 +278,8 @@ func (this *LedLayout) setAll(c Color) {
 }
 
 func (this *LedLayout) resetAll() {
-	size := uint8(len(this))
-	for layer := uint8(0); layer < size; layer++ {
-		for index := uint8(0); index < size*3; index++ {
+	for layer := range layerCount {
+		for index := range bytesInLayerCount {
 			this.mutateByteWithAnd(index, layer, none)
 		}
 	}
@@ -293,8 +296,8 @@ func (this *LedLayout) mutateByteWithOr(index, layer, value uint8) {
 func (this *LedLayout) getColor(x, y, z uint8) Color {
 	var color Color
 
-	for shift := range uint8(3) {
-		if this[z][shift*8+y]>>x&1 == 1 {
+	for shift := range colorCount {
+		if this[z][shift*baseLedCount+y]>>x&1 == 1 {
 			color |= 1 << shift
 		}
 	}
@@ -305,9 +308,9 @@ func (this *LedLayout) getColor(x, y, z uint8) Color {
 func layoutOffsetIndex(index uint8, c Color) []uint8 {
 	offsets := []uint8{}
 
-	for shift := uint8(0); shift < 3; shift++ {
+	for shift := range colorCount {
 		if c>>shift&1 == 1 {
-			offsets = append(offsets, shift*8+index)
+			offsets = append(offsets, shift*baseLedCount+index)
 		}
 	}
 
