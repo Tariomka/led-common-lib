@@ -31,6 +31,37 @@ func (this *LedLayout) IterateSlices() iter.Seq2[uint8, []byte] {
 	}
 }
 
+func (this *LedLayout) IterateColors() iter.Seq2[Index, Color] {
+	return func(yield func(Index, Color) bool) {
+		for zAxis := range uint8(8) {
+			for yAxis := range uint8(8) {
+				for xAxis := range uint8(8) {
+					if !yield(
+						Index{X: xAxis, Y: yAxis, Z: zAxis},
+						this.getColor(xAxis, yAxis, zAxis)) {
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+func (this *LedLayout) Overwrite(iterator iter.Seq2[uint8, []byte]) error {
+	for index, layer := range iterator {
+		if index >= 8 {
+			return nil
+		}
+
+		if len(layer) < 24 {
+			return common.ErrNotEnoughData
+		}
+
+		this[index] = [24]byte(layer)
+	}
+	return nil
+}
+
 func (this *LedLayout) ChangeSingle(x, y, z uint8, c Color) error {
 	if err := validateAxes(x, y, z); err != nil {
 		return err
@@ -257,6 +288,18 @@ func (this *LedLayout) mutateByteWithAnd(index, layer, value uint8) {
 
 func (this *LedLayout) mutateByteWithOr(index, layer, value uint8) {
 	this[layer][index] |= value
+}
+
+func (this *LedLayout) getColor(x, y, z uint8) Color {
+	var color Color
+
+	for shift := range uint8(3) {
+		if this[z][shift*8+y]>>x&1 == 1 {
+			color |= 1 << shift
+		}
+	}
+
+	return color
 }
 
 func layoutOffsetIndex(index uint8, c Color) []uint8 {
