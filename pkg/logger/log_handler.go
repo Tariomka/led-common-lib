@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,10 @@ import (
 
 const (
 	reset = "\033[0m"
+
+	bold      = 1
+	italic    = 3
+	underline = 4
 
 	black        = 30
 	red          = 31
@@ -42,9 +47,7 @@ type LogHandler struct {
 	buffer *bytes.Buffer
 }
 
-func NewLogHandler(
-	printCallback func(message string),
-	opts *slog.HandlerOptions) slog.Handler {
+func NewLogHandler(printCallback func(message string), opts *slog.HandlerOptions) slog.Handler {
 	if opts == nil {
 		opts = &slog.HandlerOptions{}
 	}
@@ -65,7 +68,65 @@ func NewLogHandler(
 	}
 }
 
-func (lh *LogHandler) Handle(ctx context.Context, record slog.Record) error {
+func (this *LogHandler) Handle(ctx context.Context, record slog.Record) error {
+	payload, err := this.getPayload(ctx, record)
+	if err != nil {
+		return err
+	}
+
+	this.print(payload)
+	return nil
+}
+
+func (this *LogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return this.handler.Enabled(ctx, level)
+}
+
+func (this *LogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &LogHandler{
+		handler: this.handler.WithAttrs(attrs),
+		print:   this.print,
+		mutex:   this.mutex,
+		buffer:  this.buffer,
+	}
+}
+
+func (this *LogHandler) WithGroup(name string) slog.Handler {
+	return &LogHandler{
+		handler: this.handler.WithGroup(name),
+		print:   this.print,
+		mutex:   this.mutex,
+		buffer:  this.buffer,
+	}
+}
+
+func (this *LogHandler) getPayload(ctx context.Context, record slog.Record) (string, error) {
+	source, attributes, err := this.handleAttributes(ctx, record)
+	if err != nil {
+		return "", err
+	}
+
+	bytes, err := json.MarshalIndent(attributes, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("error when marshaling attrs: %w", err)
+	}
+
+	components := []string{}
+	components = append(components, colorize(lightGray, record.Time.Format(timeFormat)))
+	if source != "" {
+		components = append(components, source)
+	}
+	components = append(
+		components,
+		this.handleLevel(record),
+		colorize(white, record.Message),
+		colorize(darkGray, string(bytes)))
+
+	payload := strings.Join(components, " ")
+	return payload, nil
+}
+
+func (this *LogHandler) handleLevel(record slog.Record) string {
 	level := record.Level.String() + ":"
 
 	switch record.Level {
@@ -79,65 +140,63 @@ func (lh *LogHandler) Handle(ctx context.Context, record slog.Record) error {
 		level = colorize(lightRed, level)
 	}
 
-	attrs, err := lh.computeAttrs(ctx, record)
-	if err != nil {
-		return err
-	}
-
-	bytes, err := json.MarshalIndent(attrs, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error when marshaling attrs: %w", err)
-	}
-
-	payload := strings.Join([]string{
-		colorize(lightGray, record.Time.Format(timeFormat)),
-		level,
-		colorize(white, record.Message),
-		colorize(darkGray, string(bytes)),
-	}, " ")
-
-	lh.print(payload)
-	return nil
+	return level
 }
 
-func (lh *LogHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return lh.handler.Enabled(ctx, level)
-}
-
-func (lh *LogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &LogHandler{
-		handler: lh.handler.WithAttrs(attrs),
-		print:   lh.print,
-		mutex:   lh.mutex,
-		buffer:  lh.buffer,
-	}
-}
-
-func (lh *LogHandler) WithGroup(name string) slog.Handler {
-	return &LogHandler{
-		handler: lh.handler.WithGroup(name),
-		print:   lh.print,
-		mutex:   lh.mutex,
-		buffer:  lh.buffer,
-	}
-}
-
-func (lh *LogHandler) computeAttrs(ctx context.Context, record slog.Record) (map[string]any, error) {
-	lh.mutex.Lock()
+func (this *LogHandler) handleAttributes(
+	ctx context.Context,
+	record slog.Record) (source string, attributes map[string]any, err error) {
+	this.mutex.Lock()
 	defer func() {
-		lh.buffer.Reset()
-		lh.mutex.Unlock()
+		this.buffer.Reset()
+		this.mutex.Unlock()
 	}()
 
-	if err := lh.handler.Handle(ctx, record); err != nil {
-		return nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
+	if err := this.handler.Handle(ctx, record); err != nil {
+		return "", nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
 	}
 
-	var attrs map[string]any
-	if err := json.Unmarshal(lh.buffer.Bytes(), &attrs); err != nil {
-		return nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
+	if err := json.Unmarshal(this.buffer.Bytes(), &attributes); err != nil {
+		return "", nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
 	}
-	return attrs, nil
+
+	return this.handleSource(attributes), attributes, nil
+}
+
+func (this *LogHandler) handleSource(attributes map[string]any) string {
+	attribute, ok := attributes["source"]
+	if !ok {
+		return ""
+	}
+
+	delete(attributes, "source")
+	switch value := attribute.(type) {
+	case string:
+		return stylize(bold, colorize(green, fmt.Sprintf("[%s]", value)))
+
+	case map[string]any:
+		fileAttribute, getOk := value["file"]
+		file, castOk := fileAttribute.(string)
+		if !getOk || !castOk {
+			return ""
+		}
+
+		filename := filepath.Base(file)
+		name := strings.TrimSuffix(filename, filepath.Ext(filename))
+		source := strings.ToUpper(name)
+
+		lineAttribute, getOk := value["line"]
+		line, castOk := lineAttribute.(float64)
+		if !getOk || !castOk {
+			return stylize(bold, colorize(green, fmt.Sprintf("[%s]", source)))
+		}
+
+		return stylize(bold, colorize(green, fmt.Sprintf("[%s(%.0f)]", source, line)))
+
+	default:
+		fmt.Printf("[LOG_HANDLER] received source with unknown structure: %#v\n", value)
+		return ""
+	}
 }
 
 func suppressDefaults(next func([]string, slog.Attr) slog.Attr) func([]string, slog.Attr) slog.Attr {
@@ -145,13 +204,19 @@ func suppressDefaults(next func([]string, slog.Attr) slog.Attr) func([]string, s
 		if attr.Key == slog.TimeKey || attr.Key == slog.LevelKey || attr.Key == slog.MessageKey {
 			return slog.Attr{}
 		}
+
 		if next == nil {
 			return attr
 		}
+
 		return next(groups, attr)
 	}
 }
 
 func colorize(colorCode int, value string) string {
 	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(colorCode), value, reset)
+}
+
+func stylize(style int, value string) string {
+	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(style), value, reset)
 }
