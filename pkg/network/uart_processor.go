@@ -95,7 +95,7 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, ErrChecksum
 	}
 
-	return dType, content, nil
+	return dType, append([]byte{}, content...), nil
 }
 
 func (this *UartProcessor) WriteMessage(message string) error {

@@ -72,147 +72,237 @@ func TestUartProcessor_Read(t *testing.T) {
 		assert.Equal(t, network.ErrHandshake, actualError)
 	})
 
-	// t.Run("WhenHandshakeIsAlreadyEstablished", func(t *testing.T) {
-	// 	// Arrange
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, []byte("SGFuZHNoYWtl"))
-	// 	}).Return(12, nil)
-	// 	mockUart.On("Write", mock.Anything).Return(0, nil)
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
+	t.Run("WhenHandshakeFailsBecauseOfWrongDataReceived", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("fake handshake"))
+		}).Return(14, nil)
+		uartProcessor := network.NewUartProcessor(mockUart)
 
-	// 	expectedMessage1 := []byte{
-	// 		0xAA,       // Start marker
-	// 		0x01,       // UartMessage data type
-	// 		0x00, 0x08, // Payload length (8 bytes)
-	// 		'M', 'e', 's', 's', 'a', 'g', 'e', '1',
-	// 		0xBA, 0xA6, 0x5C, 0x7C, // Checksum
-	// 		0x55, // End marker
-	// 	}
-	// 	expectedMessage2 := []byte{
-	// 		0xAA,       // Start marker
-	// 		0x01,       // UartMessage data type
-	// 		0x00, 0x08, // Payload length (8 bytes)
-	// 		'M', 'e', 's', 's', 'a', 'g', 'e', '2',
-	// 		0x23, 0xAF, 0x0D, 0xC6, // Checksum
-	// 		0x55, // End marker
-	// 	}
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
 
-	// 	// Act
-	// 	actualDType, actualData, actualError := uartProcessor.Read()
-	// 	uartProcessor.WriteMessage("Message1")
-	// 	actual := uartProcessor.WriteMessage("Message2")
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Equal(t, network.ErrHandshake, actualError)
+	})
 
-	// 	// Assert
-	// 	assert.Nil(t, actual)
-	// 	mockUart.AssertNumberOfCalls(t, "Write", 3) // Handshake + message1 + message2
-	// 	mockUart.AssertCalled(t, "Write", expectedMessage1)
-	// 	mockUart.AssertCalled(t, "Write", expectedMessage2)
-	// })
+	t.Run("WhenHandshakeEstablishedInMultiplePackets", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf[0:4], []byte("SGFu"))
+		}).Return(4, nil).Once()
+		mockUart.On("Read", append([]byte("SGFu"), make([]byte, 1020)...)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf[4:8], []byte("ZHNo"))
+		}).Return(4, nil)
+		mockUart.On("Read", append([]byte("SGFuZHNo"), make([]byte, 1016)...)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf[8:12], []byte("YWtl"))
+		}).Return(4, nil)
+		mockUart.On("Read", make([]byte, 1024)).Return(0, nil)
 
-	// t.Run("ValidFrame", func(t *testing.T) {
-	// 	payload := []byte("hello")
-	// 	frame := makeFrame(network.UartMessage, payload)
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	// Handshake
-	// 	mockUart.On("Write", makeHandshakeFrame()).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, makeHandshakeFrame())
-	// 	}).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	// Frame
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, frame)
-	// 	}).Return(len(frame), nil).Once()
+		uartProcessor := network.NewUartProcessor(mockUart)
 
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
-	// 	dType, data, err := uartProcessor.Read()
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, network.UartMessage, dType)
-	// 	assert.Equal(t, payload, data)
-	// })
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
 
-	// t.Run("InvalidStartMarker", func(t *testing.T) {
-	// 	payload := []byte("bad")
-	// 	frame := makeFrame(network.UartMessage, payload)
-	// 	frame[0] = 0x00
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	mockUart.On("Write", makeHandshakeFrame()).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, makeHandshakeFrame())
-	// 	}).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, frame)
-	// 	}).Return(len(frame), nil).Once()
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Nil(t, actualError)
+		mockUart.AssertNumberOfCalls(t, "Read", 4) // Handeshake in 3 packets + Read packet
+	})
 
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
-	// 	_, _, err := uartProcessor.Read()
-	// 	assert.Equal(t, network.ErrExpectedStart, err)
-	// })
+	t.Run("WhenHandshakeIsAlreadyEstablished", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf[0:4], []byte("\xAA\x01\x00\x00\x00\x00\x00\x00\x55"))
+		}).Return(4, nil)
+		uartProcessor := network.NewUartProcessor(mockUart)
 
-	// t.Run("InvalidEndMarker", func(t *testing.T) {
-	// 	payload := []byte("badend")
-	// 	frame := makeFrame(network.UartMessage, payload)
-	// 	frame[len(frame)-1] = 0x00
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	mockUart.On("Write", makeHandshakeFrame()).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, makeHandshakeFrame())
-	// 	}).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, frame)
-	// 	}).Return(len(frame), nil).Once()
+		// Act
+		uartProcessor.Read()
+		uartProcessor.Read()
 
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
-	// 	_, _, err := uartProcessor.Read()
-	// 	assert.Equal(t, network.ErrExpectedEnd, err)
-	// })
+		// Assert
+		mockUart.AssertNumberOfCalls(t, "Read", 3) // Handshake + 2 Read packets
+	})
 
-	// t.Run("InvalidChecksum", func(t *testing.T) {
-	// 	payload := []byte("badcrc")
-	// 	frame := makeFrame(network.UartMessage, payload)
-	// 	frame[len(frame)-5] ^= 0xFF // Corrupt checksum
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	mockUart.On("Write", makeHandshakeFrame()).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, makeHandshakeFrame())
-	// 	}).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, frame)
-	// 	}).Return(len(frame), nil).Once()
+	t.Run("WhenStartMarkerIsInvalid", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("\x00"))
+		}).Return(12, nil).Once()
+		uartProcessor := network.NewUartProcessor(mockUart)
 
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
-	// 	_, _, err := uartProcessor.Read()
-	// 	assert.Equal(t, network.ErrChecksum, err)
-	// })
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
 
-	// t.Run("TooMuchData", func(t *testing.T) {
-	// 	payload := make([]byte, 1025)
-	// 	frame := makeFrame(network.UartMessage, payload)
-	// 	mockUart := mocks.NewMockReadWriter()
-	// 	mockUart.On("Write", makeHandshakeFrame()).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, makeHandshakeFrame())
-	// 	}).Return(len(makeHandshakeFrame()), nil).Once()
-	// 	mockUart.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-	// 		buf := args.Get(0).([]byte)
-	// 		copy(buf, frame)
-	// 	}).Return(len(frame), nil).Once()
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Equal(t, network.ErrExpectedStart, actualError)
+	})
 
-	// 	uartProcessor := network.NewUartProcessor(mockUart)
-	// 	_, _, err := uartProcessor.Read()
-	// 	assert.Equal(t, network.ErrTooMuchData, err)
-	// })
+	t.Run("WhenContentLengthTooBig", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("\xAA\x00\xFF\xFF"))
+		}).Return(12, nil).Once()
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
+
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Equal(t, network.ErrTooMuchData, actualError)
+	})
+
+	t.Run("WhenEndMarkerIsInvalid", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte{
+				0xAA,       // Start marker
+				0x00,       // UartEmpty data type
+				0x00, 0x00, // Payload length (0 bytes)
+				0x00, 0x00, 0x00, 0x00, // Checksum
+				0xAA, // Invalid end marker
+			})
+		}).Return(12, nil).Once()
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
+
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Equal(t, network.ErrExpectedEnd, actualError)
+	})
+
+	t.Run("WhenChecksumIsInvalid", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte{
+				0xAA,       // Start marker
+				0x00,       // UartEmpty data type
+				0x00, 0x00, // Payload length (0 bytes)
+				0xFF, 0xFF, 0xFF, 0xFF, // Invalid Checksum
+				0x55, // End marker
+			})
+		}).Return(12, nil).Once()
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
+
+		// Assert
+		assert.Equal(t, network.UartEmpty, actualDType)
+		assert.Nil(t, actualData)
+		assert.Equal(t, network.ErrChecksum, actualError)
+	})
+
+	t.Run("WhenPacketIsValid", func(t *testing.T) {
+		testArgs := [][]any{
+			{
+				[]byte("\xAA\x00\x00\x03huh\xA8\xA4\x27\x53\x55"),
+				network.UartEmpty,
+				[]byte("huh"),
+			},
+			{
+				[]byte("\xAA\x01\x00\x07Message\x79\x00\x09\xE3\x55"),
+				network.UartMessage,
+				[]byte("Message"),
+			},
+			{
+				[]byte("\xAA\x02\x00\x04\xAA\xBB\xCC\xDD\x55\xB4\x01\xA7\x55"),
+				network.UartBytes,
+				[]byte("\xAA\xBB\xCC\xDD"),
+			},
+			{
+				[]byte("\xAA\x03\x00\x0FSetting1=Value1\x55\x35\xEF\xDC\x55"),
+				network.UartSetting,
+				[]byte("Setting1=Value1"),
+			},
+			{[]byte("\xAA\x04\x00\x00\x00\x00\x00\x00\x55"), network.UartPing, []byte{}},
+			{[]byte("\xAA\x05\x00\x00\x00\x00\x00\x00\x55"), network.UartPong, []byte{}},
+			{
+				[]byte("\xAA\xFF\x00\x10Fuck it we ball!\x2F\xC1\xE7\x60\x55"),
+				network.UartDataType(0xFF),
+				[]byte("Fuck it we ball!"),
+			},
+		}
+
+		testCase := func(t *testing.T, readContent []byte, expectedDType network.UartDataType, expectedData []byte) {
+			// Arrange
+			mockUart := mocks.NewMockReadWriter()
+			mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+			mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+				buf := args.Get(0).([]byte)
+				copy(buf, []byte("SGFuZHNoYWtl"))
+			}).Return(12, nil).Once()
+			mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+				buf := args.Get(0).([]byte)
+				copy(buf, readContent)
+			}).Return(len(readContent), nil).Once()
+			uartProcessor := network.NewUartProcessor(mockUart)
+
+			// Act
+			actualDType, actualData, actualError := uartProcessor.Read()
+
+			// Assert
+			assert.Equal(t, expectedDType, actualDType)
+			assert.Equal(t, expectedData, actualData)
+			assert.Nil(t, actualError)
+		}
+
+		helpers.Parametrize(t, testCase, testArgs)
+	})
 }
 
 func TestUartProcessor_WriteMessage(t *testing.T) {
