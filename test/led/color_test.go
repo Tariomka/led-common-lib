@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestToProcessorColor(t *testing.T) {
+func TestRGBAToColor(t *testing.T) {
 	t.Run("WhenAlphaIsZero", func(t *testing.T) {
 		// Arrange
 		// Act

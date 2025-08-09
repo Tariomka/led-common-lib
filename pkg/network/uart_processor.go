@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"io"
 	"slices"
 )
@@ -13,6 +14,7 @@ var (
 	ErrExpectedStart = errors.New("expected start marker")
 	ErrExpectedEnd   = errors.New("expected end marker")
 	ErrTooMuchData   = errors.New("too much data")
+	ErrChecksum      = errors.New("checksum error")
 )
 
 type UartDataType byte
@@ -31,14 +33,16 @@ var handshakeLength = len(handshake)
 var ellipsis = []byte("...")
 
 const (
-	startMarker = byte('(')
-	endMarker   = byte(')')
+	startMarker = byte(0xAA)
+	endMarker   = byte(0x55)
 
 	maxRetries = 3
 
-	bufferSize     = 1024
-	nonContentSize = 1 + 1 + 2 + 1 // start marker + type + content length + end marker
-	maxPayloadSize = bufferSize - nonContentSize
+	bufferSize        = 1024
+	sizeBeforeContent = 1 + 1 + 2 // start marker + type + content length
+	sizeAfterContent  = 4 + 1     // checksum + end marker
+	nonContentSize    = sizeBeforeContent + sizeAfterContent
+	maxPayloadSize    = bufferSize - nonContentSize
 )
 
 type UartProcessor struct {
@@ -68,6 +72,7 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, nil
 	}
 
+	defer this.clearBuffer(n) // keep in mind that this might fail with continous reading
 	if this.buffer[0] != startMarker {
 		return UartEmpty, nil, ErrExpectedStart
 	}
@@ -83,7 +88,14 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, ErrExpectedEnd
 	}
 
-	return dType, this.buffer[nonContentSize-1 : payloadSize+nonContentSize-1], nil
+	content := this.buffer[sizeBeforeContent : sizeBeforeContent+payloadSize]
+	checksumPos := sizeBeforeContent + payloadSize
+	if checksum := binary.BigEndian.Uint32(
+		this.buffer[checksumPos : checksumPos+4]); checksum != crc32.ChecksumIEEE(content) {
+		return UartEmpty, nil, ErrChecksum
+	}
+
+	return dType, content, nil
 }
 
 func (this *UartProcessor) WriteMessage(message string) error {
@@ -113,31 +125,17 @@ func (this *UartProcessor) SendPong() {
 }
 
 func (this *UartProcessor) write(dType UartDataType, payload []byte) error {
-	var buffer bytes.Buffer
-	lengthBytes := [2]byte{}
-	buffer.WriteByte(startMarker)
-	buffer.WriteByte(byte(dType))
-	payloadLength := len(payload)
-	if maxPayloadSize >= payloadLength {
-		// TODO: make it pretier, maybe dry
-		binary.BigEndian.PutUint16(lengthBytes[:], uint16(payloadLength))
-		buffer.Write(lengthBytes[:])
-		buffer.Write(payload)
-		buffer.WriteByte(endMarker)
-		_, err := this.uart.Write(buffer.Bytes())
+	if payloadLength := len(payload); maxPayloadSize >= payloadLength {
+		_, err := this.uart.Write(payloadToPacket(payload, dType))
 		return err
 	}
 
-	binary.BigEndian.PutUint16(lengthBytes[:], maxPayloadSize-3)
-	buffer.Write(lengthBytes[:])
-	buffer.Write(payload[:maxPayloadSize-3])
-	buffer.Write(ellipsis)
-	buffer.WriteByte(endMarker)
-	if _, err := this.uart.Write(buffer.Bytes()); err != nil {
+	currentPayload, nextPayload := splitPayload(payload, dType)
+	if _, err := this.uart.Write(payloadToPacket(currentPayload, dType)); err != nil {
 		return err
 	}
 
-	return this.write(dType, append(ellipsis, payload[maxPayloadSize-3:]...))
+	return this.write(dType, nextPayload)
 }
 
 func (this *UartProcessor) synchronize() error {
@@ -157,20 +155,20 @@ func (this *UartProcessor) establishHandshake() bool {
 		return false
 	}
 
-	// TODO: retry few times
 	readLength := 0
 	retries := 0
-	for readLength < handshakeLength || retries < maxRetries {
+	for readLength < handshakeLength {
 		n, err := this.uart.Read(this.buffer)
 		readLength += n
-		if err != nil {
+		if err != nil || retries >= maxRetries {
 			return false
 		}
 
 		retries++
 	}
 
-	if slices.Compare(this.buffer[:handshakeLength], handshake) != 0 {
+	if len(this.buffer) < handshakeLength ||
+		slices.Compare(this.buffer[:handshakeLength], handshake) != 0 {
 		return false
 	}
 
@@ -195,3 +193,35 @@ func (this *UartProcessor) clearBuffer(index int) {
 // probably should be something like:
 // func CreateUartMessage(message string) string
 // and most likely will need to
+
+func payloadToPacket(payload []byte, dType UartDataType) []byte {
+	var buffer bytes.Buffer
+	buffer.WriteByte(startMarker)
+	buffer.WriteByte(byte(dType))
+
+	lengthBytes := [2]byte{}
+	binary.BigEndian.PutUint16(lengthBytes[:], uint16(len(payload)))
+	buffer.Write(lengthBytes[:])
+	buffer.Write(payload)
+
+	checksum := [4]byte{}
+	binary.BigEndian.PutUint32(checksum[:], crc32.ChecksumIEEE(payload))
+	buffer.Write(checksum[:])
+	buffer.WriteByte(endMarker)
+
+	return buffer.Bytes()
+}
+
+func splitPayload(payload []byte, dType UartDataType) (current []byte, next []byte) {
+	if len(payload) <= maxPayloadSize {
+		return payload, nil
+	}
+
+	if dType == UartMessage {
+		payloadLength := uint16(maxPayloadSize - 3)
+		return slices.Concat(payload[:payloadLength], ellipsis),
+			slices.Concat(ellipsis, payload[payloadLength:])
+	}
+
+	return payload[:maxPayloadSize], payload[maxPayloadSize:]
+}
