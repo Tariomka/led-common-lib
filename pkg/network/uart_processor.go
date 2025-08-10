@@ -1,49 +1,10 @@
 package network
 
 import (
-	"bytes"
 	"encoding/binary"
-	"errors"
 	"hash/crc32"
 	"io"
 	"slices"
-)
-
-var (
-	ErrHandshake     = errors.New("handshake failed")
-	ErrExpectedStart = errors.New("expected start marker")
-	ErrExpectedEnd   = errors.New("expected end marker")
-	ErrTooMuchData   = errors.New("too much data")
-	ErrChecksum      = errors.New("checksum error")
-)
-
-type UartDataType byte
-
-const (
-	UartEmpty UartDataType = iota
-	UartMessage
-	UartBytes
-	UartSetting
-	UartPing
-	UartPong
-)
-
-var handshake = []byte("SGFuZHNoYWtl") // base64 encoded "Handshake"
-var handshakeLength = len(handshake)
-var ellipsis = []byte("...")
-
-const (
-	startMarker = byte(0xAA)
-	endMarker   = byte(0x55)
-
-	maxRetries = 3
-
-	bufferSize        = 1024
-	sizeBeforeContent = 1 + 1 + 2 // start marker + type + content length
-	checksumSize      = 4
-	sizeAfterContent  = checksumSize + 1 // checksum + end marker
-	nonContentSize    = sizeBeforeContent + sizeAfterContent
-	maxPayloadSize    = bufferSize - nonContentSize
 )
 
 type UartProcessor struct {
@@ -129,7 +90,6 @@ func (this *UartProcessor) WriteBytes(data []byte) error {
 		return err
 	}
 
-	// TODO: desync the connection?
 	return this.write(UartBytes, data)
 }
 
@@ -152,7 +112,7 @@ func (this *UartProcessor) Synchronize() error {
 // Calls internal Read method, updates contentLength and
 // if an error occurs, clears the buffer before returning
 func (this *UartProcessor) read() (int, error) {
-	// n, err := this.uart.Read(this.buffer[this.bufferIndex:])
+	// TODO: check if this is correct or is this.buffer[this.bufferIndex:] needed
 	n, err := this.uart.Read(this.buffer)
 	this.contentLength += n
 	if err != nil {
@@ -163,12 +123,12 @@ func (this *UartProcessor) read() (int, error) {
 
 func (this *UartProcessor) write(dType UartDataType, payload []byte) error {
 	if payloadLength := len(payload); maxPayloadSize >= payloadLength {
-		_, err := this.uart.Write(payloadToPacket(payload, dType))
+		_, err := this.uart.Write(payloadToUartPacket(payload, dType))
 		return err
 	}
 
 	currentPayload, nextPayload := splitPayload(payload, dType)
-	if _, err := this.uart.Write(payloadToPacket(currentPayload, dType)); err != nil {
+	if _, err := this.uart.Write(payloadToUartPacket(currentPayload, dType)); err != nil {
 		return err
 	}
 
@@ -228,42 +188,4 @@ func (this *UartProcessor) clearBuffer(index int) {
 	} else {
 		this.contentLength = 0
 	}
-}
-
-// TODO: add a function for formatting strings to messages for
-// easy sending with print(createMessage("message"))
-// probably should be something like:
-// func CreateUartMessage(message string) string
-// and most likely will need to
-
-func payloadToPacket(payload []byte, dType UartDataType) []byte {
-	var buffer bytes.Buffer
-	buffer.WriteByte(startMarker)
-	buffer.WriteByte(byte(dType))
-
-	lengthBytes := [2]byte{}
-	binary.BigEndian.PutUint16(lengthBytes[:], uint16(len(payload)))
-	buffer.Write(lengthBytes[:])
-	buffer.Write(payload)
-
-	checksum := [4]byte{}
-	binary.BigEndian.PutUint32(checksum[:], crc32.ChecksumIEEE(payload))
-	buffer.Write(checksum[:])
-	buffer.WriteByte(endMarker)
-
-	return buffer.Bytes()
-}
-
-func splitPayload(payload []byte, dType UartDataType) (current []byte, next []byte) {
-	if len(payload) <= maxPayloadSize {
-		return payload, nil
-	}
-
-	if dType == UartMessage {
-		payloadLength := uint16(maxPayloadSize - 3)
-		return slices.Concat(payload[:payloadLength], ellipsis),
-			slices.Concat(ellipsis, payload[payloadLength:])
-	}
-
-	return payload[:maxPayloadSize], payload[maxPayloadSize:]
 }
