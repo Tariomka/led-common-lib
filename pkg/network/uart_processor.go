@@ -81,7 +81,6 @@ func (this *UartProcessor) WriteMessage(message string) error {
 		return err
 	}
 
-	// TODO: desync the connection?
 	return this.write(UartMessage, []byte(message))
 }
 
