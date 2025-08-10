@@ -141,7 +141,16 @@ func (this *UartProcessor) SendPong() {
 	this.write(UartPong, nil)
 }
 
-// Calls internal Read method, updates contentLength and if an error occurs, clears the buffer before returning
+func (this *UartProcessor) Desynchronize() {
+	this.synched = false
+}
+
+func (this *UartProcessor) Synchronize() error {
+	return this.synchronize()
+}
+
+// Calls internal Read method, updates contentLength and
+// if an error occurs, clears the buffer before returning
 func (this *UartProcessor) read() (int, error) {
 	// n, err := this.uart.Read(this.buffer[this.bufferIndex:])
 	n, err := this.uart.Read(this.buffer)
