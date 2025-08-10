@@ -40,15 +40,17 @@ const (
 
 	bufferSize        = 1024
 	sizeBeforeContent = 1 + 1 + 2 // start marker + type + content length
-	sizeAfterContent  = 4 + 1     // checksum + end marker
+	checksumSize      = 4
+	sizeAfterContent  = checksumSize + 1 // checksum + end marker
 	nonContentSize    = sizeBeforeContent + sizeAfterContent
 	maxPayloadSize    = bufferSize - nonContentSize
 )
 
 type UartProcessor struct {
-	buffer  []byte // TODO: think about a [bufferSize]byte array instead of slice, to not allocate
-	uart    io.ReadWriter
-	synched bool
+	buffer        []byte // TODO: think about a [bufferSize]byte array instead of slice, to not allocate
+	uart          io.ReadWriter
+	contentLength int
+	synched       bool
 }
 
 func NewUartProcessor(uart io.ReadWriter) *UartProcessor {
@@ -63,35 +65,50 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, err
 	}
 
-	n, err := this.uart.Read(this.buffer)
-	if err != nil {
-		return UartEmpty, nil, err
+	for this.contentLength < sizeBeforeContent {
+		n, err := this.read()
+		if err != nil {
+			return UartEmpty, nil, err
+		}
+		if n == 0 {
+			this.clearBuffer(this.contentLength)
+			return UartEmpty, nil, nil
+		}
 	}
 
-	if n == 0 {
-		return UartEmpty, nil, nil
-	}
-
-	defer this.clearBuffer(n) // keep in mind that this might fail with continous reading
 	if this.buffer[0] != startMarker {
+		this.clearBuffer(this.contentLength)
 		return UartEmpty, nil, ErrExpectedStart
 	}
 
-	// TODO: keep reading?
 	dType := UartDataType(this.buffer[1])
 	payloadSize := binary.BigEndian.Uint16(this.buffer[2:4])
 	if payloadSize > maxPayloadSize {
+		this.clearBuffer(this.contentLength)
 		return UartEmpty, nil, ErrTooMuchData
 	}
 
-	if this.buffer[payloadSize+nonContentSize-1] != endMarker {
+	packetSize := nonContentSize + int(payloadSize)
+	for this.contentLength < packetSize {
+		n, err := this.read()
+		if err != nil {
+			return UartEmpty, nil, err
+		}
+		if n == 0 {
+			this.clearBuffer(this.contentLength)
+			return UartEmpty, nil, nil
+		}
+	}
+
+	defer this.clearBuffer(packetSize)
+	if this.buffer[packetSize-1] != endMarker {
 		return UartEmpty, nil, ErrExpectedEnd
 	}
 
 	content := this.buffer[sizeBeforeContent : sizeBeforeContent+payloadSize]
 	checksumPos := sizeBeforeContent + payloadSize
 	if checksum := binary.BigEndian.Uint32(
-		this.buffer[checksumPos : checksumPos+4]); checksum != crc32.ChecksumIEEE(content) {
+		this.buffer[checksumPos : checksumPos+checksumSize]); checksum != crc32.ChecksumIEEE(content) {
 		return UartEmpty, nil, ErrChecksum
 	}
 
@@ -122,6 +139,17 @@ func (this *UartProcessor) SendPing() {
 
 func (this *UartProcessor) SendPong() {
 	this.write(UartPong, nil)
+}
+
+// Calls internal Read method, updates contentLength and if an error occurs, clears the buffer before returning
+func (this *UartProcessor) read() (int, error) {
+	// n, err := this.uart.Read(this.buffer[this.bufferIndex:])
+	n, err := this.uart.Read(this.buffer)
+	this.contentLength += n
+	if err != nil {
+		this.clearBuffer(this.contentLength)
+	}
+	return n, err
 }
 
 func (this *UartProcessor) write(dType UartDataType, payload []byte) error {
@@ -155,11 +183,9 @@ func (this *UartProcessor) establishHandshake() bool {
 		return false
 	}
 
-	readLength := 0
 	retries := 0
-	for readLength < handshakeLength {
-		n, err := this.uart.Read(this.buffer)
-		readLength += n
+	for this.contentLength < handshakeLength {
+		_, err := this.read()
 		if err != nil || retries >= maxRetries {
 			return false
 		}
@@ -169,6 +195,7 @@ func (this *UartProcessor) establishHandshake() bool {
 
 	if len(this.buffer) < handshakeLength ||
 		slices.Compare(this.buffer[:handshakeLength], handshake) != 0 {
+		this.clearBuffer(this.contentLength)
 		return false
 	}
 
@@ -181,11 +208,17 @@ func (this *UartProcessor) establishHandshake() bool {
 func (this *UartProcessor) clearBuffer(index int) {
 	if index < 0 || index > bufferSize {
 		clear(this.buffer)
+		this.contentLength = 0
 		return
 	}
 
 	clear(this.buffer[:index])
 	this.buffer = append(this.buffer[index:], this.buffer[:index]...)[:bufferSize:bufferSize]
+	if this.contentLength >= index {
+		this.contentLength -= index
+	} else {
+		this.contentLength = 0
+	}
 }
 
 // TODO: add a function for formatting strings to messages for

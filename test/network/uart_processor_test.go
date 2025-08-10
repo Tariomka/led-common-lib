@@ -2,6 +2,7 @@ package network_test
 
 import (
 	"errors"
+	"iter"
 	"math/rand"
 	"testing"
 
@@ -131,8 +132,8 @@ func TestUartProcessor_Read(t *testing.T) {
 		}).Return(12, nil).Once()
 		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[0:4], []byte("\xAA\x01\x00\x00\x00\x00\x00\x00\x55"))
-		}).Return(4, nil)
+			copy(buf, []byte("\xAA\x00\x00\x00\x00\x00\x00\x00\x55"))
+		}).Return(9, nil)
 		uartProcessor := network.NewUartProcessor(mockUart)
 
 		// Act
@@ -302,6 +303,103 @@ func TestUartProcessor_Read(t *testing.T) {
 		}
 
 		helpers.Parametrize(t, testCase, testArgs)
+	})
+
+	t.Run("WhenPacketIsReceivedInFragments", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+
+		fullPacket := []byte("\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55")
+		buffer := make([]byte, 1024)
+		for i, v := range fullPacket {
+			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+				buf := args.Get(0).([]byte)
+				copy(buf[i:i+1], []byte{v})
+			}).Return(1, nil).Once()
+			copy(buffer[i:i+1], []byte{v})
+		}
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		expectedData := []byte("\x01\x55\xAA\x55\x05")
+
+		// Act
+		actualDType, actualData, actualError := uartProcessor.Read()
+
+		// Assert
+		assert.Equal(t, network.UartBytes, actualDType)
+		assert.Equal(t, expectedData, actualData)
+		assert.Nil(t, actualError)
+	})
+
+	t.Run("WhenMultiplePacketsAreReceivedInFragments", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf, []byte("SGFuZHNoYWtl"))
+		}).Return(12, nil).Once()
+
+		fragmentPacket := func(packet []byte) iter.Seq2[struct{ start, end int }, []byte] {
+			return func(yield func(struct{ start, end int }, []byte) bool) {
+				step := 3
+				for i := 0; i < len(packet); i += step {
+					if i+step > len(packet) {
+						step = len(packet) - i
+					}
+
+					if !yield(struct{ start, end int }{start: i, end: i + step}, packet[i:i+step]) {
+						return
+					}
+				}
+			}
+		}
+		firstPacketPart := []byte(
+			"\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55" +
+				"\xAA") // Has training data of second packet
+		secondPacketPart := []byte("\x02\x00\x07\x01\x55\xAA\x55\x05\x06\x07\x6F\xE9\xC5\xE7\x55")
+		buffer := make([]byte, 1024)
+		for borders, value := range fragmentPacket(firstPacketPart) {
+			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+				buf := args.Get(0).([]byte)
+				copy(buf[borders.start:borders.end], value)
+			}).Return(borders.end-borders.start, nil).Once()
+			copy(buffer[borders.start:borders.end], value)
+		}
+		mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+			buf := args.Get(0).([]byte)
+			copy(buf[1:4], secondPacketPart[0:3])
+		}).Return(3, nil).Once()
+		buffer = append([]byte("\xAA"), make([]byte, 1023)...)
+		for borders, value := range fragmentPacket(secondPacketPart) {
+			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+				buf := args.Get(0).([]byte)
+				copy(buf[borders.start+1:borders.end+1], value)
+			}).Return(borders.end-borders.start, nil).Once()
+			copy(buffer[borders.start+1:borders.end+1], value)
+		}
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		expectedFirstData := []byte("\x01\x55\xAA\x55\x05")
+		expectedSecondData := []byte("\x01\x55\xAA\x55\x05\x06\x07")
+
+		// Act
+		actualFirstDType, actualFirstData, actualFirstError := uartProcessor.Read()
+		actualSecondDType, actualSecondData, actualSecondError := uartProcessor.Read()
+
+		// Assert
+		assert.Equal(t, network.UartBytes, actualFirstDType)
+		assert.Equal(t, expectedFirstData, actualFirstData)
+		assert.Nil(t, actualFirstError)
+
+		assert.Equal(t, network.UartBytes, actualSecondDType)
+		assert.Equal(t, expectedSecondData, actualSecondData)
+		assert.Nil(t, actualSecondError)
 	})
 }
 
