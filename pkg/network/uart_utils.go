@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/crc32"
 	"slices"
+	"time"
 )
 
 var (
@@ -28,14 +29,15 @@ const (
 )
 
 var handshake = []byte("SGFuZHNoYWtl") // base64 encoded "Handshake"
-var handshakeLength = len(handshake)
+var handshakeLength = len(handshake)   // 12
 var ellipsis = []byte("...")
 
 const (
 	startMarker = byte(0xAA)
 	endMarker   = byte(0x55)
 
-	maxRetries = 3
+	handshakeTimeout = 15 * time.Second
+	handshakeDelay   = 500 * time.Millisecond
 
 	bufferSize        = 1024
 	sizeBeforeContent = 1 + 1 + 2 // start marker + type + content length

@@ -94,15 +94,15 @@ func TestUartProcessor_Read(t *testing.T) {
 		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
 		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[0:4], []byte("SGFu"))
+			copy(buf, []byte("SGFu"))
 		}).Return(4, nil).Once()
-		mockUart.On("Read", append([]byte("SGFu"), make([]byte, 1020)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1020)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[4:8], []byte("ZHNo"))
+			copy(buf, []byte("ZHNo"))
 		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFuZHNo"), make([]byte, 1016)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1016)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[8:12], []byte("YWtl"))
+			copy(buf, []byte("YWtl"))
 		}).Return(4, nil)
 		mockUart.On("Read", make([]byte, 1024)).Return(0, nil)
 
@@ -311,13 +311,11 @@ func TestUartProcessor_Read(t *testing.T) {
 		}).Return(12, nil).Once()
 
 		fullPacket := []byte("\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55")
-		buffer := make([]byte, 1024)
 		for i, v := range fullPacket {
-			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+			mockUart.On("Read", make([]byte, 1024-i)).Run(func(args mock.Arguments) {
 				buf := args.Get(0).([]byte)
-				copy(buf[i:i+1], []byte{v})
+				copy(buf, []byte{v})
 			}).Return(1, nil).Once()
-			copy(buffer[i:i+1], []byte{v})
 		}
 		uartProcessor := network.NewUartProcessor(mockUart)
 
@@ -341,15 +339,15 @@ func TestUartProcessor_Read(t *testing.T) {
 			copy(buf, []byte("SGFuZHNoYWtl"))
 		}).Return(12, nil).Once()
 
-		fragmentPacket := func(packet []byte) iter.Seq2[struct{ start, end int }, []byte] {
-			return func(yield func(struct{ start, end int }, []byte) bool) {
+		fragmentPacket := func(packet []byte) iter.Seq2[int, []byte] {
+			return func(yield func(int, []byte) bool) {
 				step := 3
 				for i := 0; i < len(packet); i += step {
 					if i+step > len(packet) {
 						step = len(packet) - i
 					}
 
-					if !yield(struct{ start, end int }{start: i, end: i + step}, packet[i:i+step]) {
+					if !yield(i, packet[i:i+step]) {
 						return
 					}
 				}
@@ -359,25 +357,17 @@ func TestUartProcessor_Read(t *testing.T) {
 			"\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55" +
 				"\xAA") // Has training data of second packet
 		secondPacketPart := []byte("\x02\x00\x07\x01\x55\xAA\x55\x05\x06\x07\x6F\xE9\xC5\xE7\x55")
-		buffer := make([]byte, 1024)
-		for borders, value := range fragmentPacket(firstPacketPart) {
-			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+		for offset, value := range fragmentPacket(firstPacketPart) {
+			mockUart.On("Read", make([]byte, 1024-offset)).Run(func(args mock.Arguments) {
 				buf := args.Get(0).([]byte)
-				copy(buf[borders.start:borders.end], value)
-			}).Return(borders.end-borders.start, nil).Once()
-			copy(buffer[borders.start:borders.end], value)
+				copy(buf, value)
+			}).Return(len(value), nil).Once()
 		}
-		mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
-			buf := args.Get(0).([]byte)
-			copy(buf[1:4], secondPacketPart[0:3])
-		}).Return(3, nil).Once()
-		buffer = append([]byte("\xAA"), make([]byte, 1023)...)
-		for borders, value := range fragmentPacket(secondPacketPart) {
-			mockUart.On("Read", append([]byte{}, buffer...)).Run(func(args mock.Arguments) {
+		for offset, value := range fragmentPacket(secondPacketPart) {
+			mockUart.On("Read", make([]byte, 1023-offset)).Run(func(args mock.Arguments) {
 				buf := args.Get(0).([]byte)
-				copy(buf[borders.start+1:borders.end+1], value)
-			}).Return(borders.end-borders.start, nil).Once()
-			copy(buffer[borders.start+1:borders.end+1], value)
+				copy(buf, value)
+			}).Return(len(value), nil).Once()
 		}
 		uartProcessor := network.NewUartProcessor(mockUart)
 
@@ -503,15 +493,15 @@ func TestUartProcessor_WriteMessage(t *testing.T) {
 		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
 		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[0:4], []byte("SGFu"))
-		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFu"), make([]byte, 1020)...)).Run(func(args mock.Arguments) {
+			copy(buf, []byte("SGFu"))
+		}).Return(4, nil).Once()
+		mockUart.On("Read", make([]byte, 1020)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[4:8], []byte("ZHNo"))
+			copy(buf, []byte("ZHNo"))
 		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFuZHNo"), make([]byte, 1016)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1016)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[8:12], []byte("YWtl"))
+			copy(buf, []byte("YWtl"))
 		}).Return(4, nil)
 		mockUart.On("Write", mock.Anything).Return(0, nil)
 
@@ -838,15 +828,15 @@ func TestUartProcessor_WriteBytes(t *testing.T) {
 		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
 		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[0:4], []byte("SGFu"))
-		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFu"), make([]byte, 1020)...)).Run(func(args mock.Arguments) {
+			copy(buf, []byte("SGFu"))
+		}).Return(4, nil).Once()
+		mockUart.On("Read", make([]byte, 1020)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[4:8], []byte("ZHNo"))
+			copy(buf, []byte("ZHNo"))
 		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFuZHNo"), make([]byte, 1016)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1016)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[8:12], []byte("YWtl"))
+			copy(buf, []byte("YWtl"))
 		}).Return(4, nil)
 		mockUart.On("Write", mock.Anything).Return(0, nil)
 
@@ -1232,21 +1222,35 @@ func TestUartProcessor_Synchronize(t *testing.T) {
 		assert.Equal(t, network.ErrHandshake, actual)
 	})
 
+	t.Run("WhenHandshakeFailsBecauseOfTimeout", func(t *testing.T) {
+		// Arrange
+		mockUart := mocks.NewMockReadWriter()
+		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+		mockUart.On("Read", make([]byte, 1024)).Return(0, nil)
+		uartProcessor := network.NewUartProcessor(mockUart)
+
+		// Act
+		actual := uartProcessor.Synchronize()
+
+		// Assert
+		assert.Equal(t, network.ErrHandshake, actual)
+	})
+
 	t.Run("WhenHandshakeIsReceivedInFragments", func(t *testing.T) {
 		// Arrange
 		mockUart := mocks.NewMockReadWriter()
 		mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
 		mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[0:4], []byte("SGFu"))
+			copy(buf, []byte("SGFu"))
 		}).Return(4, nil).Once()
-		mockUart.On("Read", append([]byte("SGFu"), make([]byte, 1020)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1020)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[4:8], []byte("ZHNo"))
+			copy(buf, []byte("ZHNo"))
 		}).Return(4, nil)
-		mockUart.On("Read", append([]byte("SGFuZHNo"), make([]byte, 1016)...)).Run(func(args mock.Arguments) {
+		mockUart.On("Read", make([]byte, 1016)).Run(func(args mock.Arguments) {
 			buf := args.Get(0).([]byte)
-			copy(buf[8:12], []byte("YWtl"))
+			copy(buf, []byte("YWtl"))
 		}).Return(4, nil)
 
 		uartProcessor := network.NewUartProcessor(mockUart)
@@ -1278,4 +1282,187 @@ func TestUartProcessor_Synchronize(t *testing.T) {
 		assert.Nil(t, actualSecond)
 		mockUart.AssertNumberOfCalls(t, "Read", 1)
 	})
+}
+
+func TestUartProcessor(t *testing.T) {
+	t.Run("MemoryAllocaions", func(t *testing.T) {
+		testArgs := [][]any{
+			{BenchmarkUartProcessor_SynchronizedSinglePacketRead, int64(58), float64(0)},
+			{BenchmarkUartProcessor_SynchronizedMultiPacketRead, int64(59), float64(0)},
+			{BenchmarkUartProcessor_SinglePacketRead, int64(133), float64(0)},
+			{BenchmarkUartProcessor_MultiPacketRead, int64(266), float64(0)},
+			{BenchmarkUartProcessor_Handshake, int64(127), float64(0)},
+			{BenchmarkUartProcessor_MultiframgentHandshake, int64(290), float64(10)},
+		}
+
+		testCase := func(t *testing.T, benchmark func(*testing.B), expected int64, allocationRange float64) {
+			// Act
+			actual := testing.Benchmark(benchmark)
+
+			// Assert
+			assert.InDelta(t, expected, actual.AllocsPerOp(), allocationRange)
+		}
+
+		helpers.Parametrize(t, testCase, testArgs)
+	})
+
+	t.Run("AllocationSize", func(t *testing.T) {
+		testArgs := [][]any{
+			{BenchmarkUartProcessor_SynchronizedSinglePacketRead, int64(24650)},
+			{BenchmarkUartProcessor_SynchronizedMultiPacketRead, int64(24700)},
+			{BenchmarkUartProcessor_SinglePacketRead, int64(32500)},
+			{BenchmarkUartProcessor_MultiPacketRead, int64(65500)},
+			{BenchmarkUartProcessor_Handshake, int64(23000)},
+			{BenchmarkUartProcessor_MultiframgentHandshake, int64(139000)},
+		}
+
+		testCase := func(t *testing.T, benchmark func(*testing.B), expected int64) {
+			// Act
+			actual := testing.Benchmark(benchmark)
+
+			// Assert
+			assert.Less(t, actual.AllocedBytesPerOp(), expected)
+		}
+
+		helpers.Parametrize(t, testCase, testArgs)
+	})
+}
+
+func BenchmarkUartProcessor_SynchronizedSinglePacketRead(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFuZHNoYWtl"))
+	}).Return(12, nil).Once()
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, "\xAA\x00\x00\x03huh\xA8\xA4\x27\x53\x55")
+	}).Return(12, nil)
+
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Read()
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkUartProcessor_SynchronizedMultiPacketRead(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFuZHNoYWtl"))
+	}).Return(12, nil).Once()
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte(
+			"\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55"+
+				"\xAA\x02\x00\x07\x01\x55\xAA\x55\x05\x06\x07\x6F\xE9\xC5\xE7\x55"))
+	}).Return(30, nil)
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Read()
+		uartProcessor.Read()
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkUartProcessor_SinglePacketRead(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFuZHNoYWtl"))
+	}).Return(12, nil).Once()
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, "\xAA\x00\x00\x03huh\xA8\xA4\x27\x53\x55")
+	}).Return(12, nil)
+
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Desynchronize()
+		uartProcessor.Read()
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkUartProcessor_MultiPacketRead(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFuZHNoYWtl"))
+	}).Return(12, nil).Once()
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte(
+			"\xAA\x02\x00\x05\x01\x55\xAA\x55\x05\x64\xD8\xA4\x15\x55"+
+				"\xAA\x02\x00\x07\x01\x55\xAA\x55\x05\x06\x07\x6F\xE9\xC5\xE7\x55"))
+	}).Return(30, nil)
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Desynchronize()
+		uartProcessor.Read()
+		uartProcessor.Read()
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkUartProcessor_Handshake(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFuZHNoYWtl"))
+	}).Return(12, nil)
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Desynchronize()
+		uartProcessor.Synchronize()
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkUartProcessor_MultiframgentHandshake(b *testing.B) {
+	// Arrange
+	mockUart := mocks.NewMockReadWriter()
+	mockUart.On("Write", []byte("SGFuZHNoYWtl")).Return(12, nil)
+	mockUart.On("Read", make([]byte, 1024)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("SGFu"))
+	}).Return(4, nil)
+	mockUart.On("Read", make([]byte, 1020)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("ZHNo"))
+	}).Return(4, nil)
+	mockUart.On("Read", make([]byte, 1016)).Run(func(args mock.Arguments) {
+		buf := args.Get(0).([]byte)
+		copy(buf, []byte("YWtl"))
+	}).Return(4, nil)
+
+	uartProcessor := network.NewUartProcessor(mockUart)
+
+	// Act
+	for b.Loop() {
+		uartProcessor.Desynchronize()
+		uartProcessor.Synchronize()
+	}
+	b.ReportAllocs()
 }
