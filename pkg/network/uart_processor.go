@@ -9,7 +9,7 @@ import (
 )
 
 type UartProcessor struct {
-	buffer        []byte // TODO: think about a [bufferSize]byte array instead of slice, to not allocate
+	buffer        [bufferSize]byte
 	uart          io.ReadWriter
 	contentLength int
 	synched       bool
@@ -17,13 +17,12 @@ type UartProcessor struct {
 
 func NewUartProcessor(uart io.ReadWriter) *UartProcessor {
 	return &UartProcessor{
-		buffer: make([]byte, bufferSize),
-		uart:   uart,
+		uart: uart,
 	}
 }
 
 func (this *UartProcessor) Read() (dType UartDataType, content []byte, err error) {
-	if err := this.synchronize(); err != nil {
+	if err = this.synchronize(); err != nil {
 		return UartEmpty, nil, err
 	}
 
@@ -111,13 +110,13 @@ func (this *UartProcessor) Synchronize() error {
 
 // Calls internal Read method, updates contentLength and
 // if an error occurs, clears the buffer before returning
-func (this *UartProcessor) read() (int, error) {
-	n, err := this.uart.Read(this.buffer[this.contentLength:])
-	this.contentLength += n
+func (this *UartProcessor) read() (length int, err error) {
+	length, err = this.uart.Read(this.buffer[this.contentLength:])
+	this.contentLength += length
 	if err != nil {
 		this.clearBuffer(this.contentLength)
 	}
-	return n, err
+	return length, err
 }
 
 func (this *UartProcessor) write(dType UartDataType, payload []byte) error {
@@ -187,13 +186,15 @@ func (this *UartProcessor) establishHandshake() bool {
 // otherwise clears from start to the index, shifting the rest of the data to the start
 func (this *UartProcessor) clearBuffer(index int) {
 	if index < 0 || index > bufferSize {
-		clear(this.buffer)
+		clear(this.buffer[:])
 		this.contentLength = 0
 		return
 	}
 
 	clear(this.buffer[:index])
-	this.buffer = append(this.buffer[index:], this.buffer[:index]...)[:bufferSize:bufferSize]
+	for i := index; i < bufferSize; i++ {
+		this.buffer[i-index] = this.buffer[i]
+	}
 	if this.contentLength >= index {
 		this.contentLength -= index
 	} else {
