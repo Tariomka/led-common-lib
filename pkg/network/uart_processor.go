@@ -5,6 +5,7 @@ import (
 	"hash/crc32"
 	"io"
 	"slices"
+	"time"
 )
 
 type UartProcessor struct {
@@ -21,7 +22,7 @@ func NewUartProcessor(uart io.ReadWriter) *UartProcessor {
 	}
 }
 
-func (this *UartProcessor) Read() (UartDataType, []byte, error) {
+func (this *UartProcessor) Read() (dType UartDataType, content []byte, err error) {
 	if err := this.synchronize(); err != nil {
 		return UartEmpty, nil, err
 	}
@@ -42,7 +43,7 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, ErrExpectedStart
 	}
 
-	dType := UartDataType(this.buffer[1])
+	dType = UartDataType(this.buffer[1])
 	payloadSize := binary.BigEndian.Uint16(this.buffer[2:4])
 	if payloadSize > maxPayloadSize {
 		this.clearBuffer(this.contentLength)
@@ -66,7 +67,7 @@ func (this *UartProcessor) Read() (UartDataType, []byte, error) {
 		return UartEmpty, nil, ErrExpectedEnd
 	}
 
-	content := this.buffer[sizeBeforeContent : sizeBeforeContent+payloadSize]
+	content = this.buffer[sizeBeforeContent : sizeBeforeContent+payloadSize]
 	checksumPos := sizeBeforeContent + payloadSize
 	if checksum := binary.BigEndian.Uint32(
 		this.buffer[checksumPos : checksumPos+checksumSize]); checksum != crc32.ChecksumIEEE(content) {
@@ -111,8 +112,7 @@ func (this *UartProcessor) Synchronize() error {
 // Calls internal Read method, updates contentLength and
 // if an error occurs, clears the buffer before returning
 func (this *UartProcessor) read() (int, error) {
-	// TODO: check if this is correct or is this.buffer[this.bufferIndex:] needed
-	n, err := this.uart.Read(this.buffer)
+	n, err := this.uart.Read(this.buffer[this.contentLength:])
 	this.contentLength += n
 	if err != nil {
 		this.clearBuffer(this.contentLength)
@@ -146,19 +146,31 @@ func (this *UartProcessor) synchronize() error {
 	return nil
 }
 
+// Blocks until handshake is established or timeout occurs.
+// Returns true if handshake is successful and removes handshake from buffer,
+// false otherwise and cleans buffer completely.
 func (this *UartProcessor) establishHandshake() bool {
 	if n, err := this.uart.Write(handshake); err != nil || n != handshakeLength {
 		return false
 	}
 
-	retries := 0
+	timeoutTimer := time.After(handshakeTimeout)
+	isFirstRead := true
 	for this.contentLength < handshakeLength {
-		_, err := this.read()
-		if err != nil || retries >= maxRetries {
+		select {
+		case <-timeoutTimer:
 			return false
-		}
+		default:
+			if _, err := this.read(); err != nil {
+				return false
+			}
 
-		retries++
+			if isFirstRead {
+				isFirstRead = false
+			} else {
+				<-time.After(handshakeDelay)
+			}
+		}
 	}
 
 	if len(this.buffer) < handshakeLength ||
