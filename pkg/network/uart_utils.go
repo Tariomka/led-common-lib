@@ -36,7 +36,7 @@ const (
 	startMarker = byte(0xAA)
 	endMarker   = byte(0x55)
 
-	handshakeTimeout = 15 * time.Second
+	handshakeTimeout = 5 * time.Second
 	handshakeDelay   = 500 * time.Millisecond
 
 	bufferSize        = 1024
