@@ -108,6 +108,15 @@ func (this *UartProcessor) Synchronize() error {
 	return this.synchronize()
 }
 
+// ReadWithoutProcessing receives data dirctly without handshake or processing.
+// This is primarily used for debugging.
+func (this *UartProcessor) ReadWithoutProcessing() ([]byte, error) {
+	length, err := this.uart.Read(this.buffer[this.contentLength:])
+	this.contentLength += length
+	defer this.clearBuffer(this.contentLength)
+	return append([]byte{}, this.buffer[:this.contentLength]...), err
+}
+
 // Calls internal Read method, updates contentLength and
 // if an error occurs, clears the buffer before returning
 func (this *UartProcessor) read() (length int, err error) {
