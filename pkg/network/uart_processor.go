@@ -173,6 +173,10 @@ func (this *UartProcessor) establishHandshake() bool {
 				return false
 			}
 
+			if index := this.searchForHandshake(); index > 0 {
+				this.clearBuffer(index)
+			}
+
 			if isFirstRead {
 				isFirstRead = false
 			} else {
@@ -209,4 +213,22 @@ func (this *UartProcessor) clearBuffer(index int) {
 	} else {
 		this.contentLength = 0
 	}
+}
+
+func (this *UartProcessor) searchForHandshake() int {
+	startIndex := 0
+	for startIndex = range this.contentLength - handshakeLength + 1 {
+		if slices.Compare(this.buffer[startIndex:startIndex+handshakeLength], handshake) == 0 {
+			return startIndex
+		}
+	}
+
+	maxLength := this.contentLength - startIndex
+	for continuationIndex := range maxLength {
+		if slices.Compare(this.buffer[startIndex+continuationIndex:this.contentLength], handshake[:maxLength-continuationIndex]) == 0 {
+			return startIndex + continuationIndex
+		}
+	}
+
+	return this.contentLength
 }
