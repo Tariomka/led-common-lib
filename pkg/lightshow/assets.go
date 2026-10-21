@@ -70,7 +70,7 @@ func (this *assets) missing(kind, name string) {
 	}
 }
 
-func lerp(v0, v1, frame, start, end int) int {
+func linearInterpolation(v0, v1, frame, start, end int) int {
 	return v0 + (v1-v0)*(frame-start)/(end-start)
 }
 
@@ -109,10 +109,10 @@ func drawGraph(prop blob.Prop, frame int, canvas *render.Canvas, a *assets) int 
 	case prop.End:
 		x, y, z, angle = field(1), field(3), field(5), field(7)
 	default:
-		x = lerp(field(0), field(1), frame, prop.Start, prop.End)
-		y = lerp(field(2), field(3), frame, prop.Start, prop.End)
-		z = lerp(field(4), field(5), frame, prop.Start, prop.End)
-		angle = lerp(field(6), field(7), frame, prop.Start, prop.End)
+		x = linearInterpolation(field(0), field(1), frame, prop.Start, prop.End)
+		y = linearInterpolation(field(2), field(3), frame, prop.Start, prop.End)
+		z = linearInterpolation(field(4), field(5), frame, prop.Start, prop.End)
+		angle = linearInterpolation(field(6), field(7), frame, prop.Start, prop.End)
 		frame -= prop.Start
 	}
 	axis, mode := int(uint16(field(8))), int(uint16(field(9)))
@@ -142,7 +142,7 @@ func drawBall(prop blob.Prop, frame int, canvas *render.Canvas) int {
 	case prop.End:
 		r = r1
 	default:
-		r = lerp(r0, r1, frame, prop.Start, prop.End)
+		r = linearInterpolation(r0, r1, frame, prop.Start, prop.End)
 		frame -= prop.Start
 	}
 	hollow := uint16(blob.I16(data, 10)) != 0
