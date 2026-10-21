@@ -2,7 +2,7 @@ package common
 
 import "errors"
 
-// Desktop <-> Pico protocol (communication/tcp)
+// Desktop <-> RPi Pico protocol (communication/tcp)
 var (
 	ErrNotEnoughData      = errors.New("not enough data")
 	ErrUnsupportedVersion = errors.New("unsupported version")
