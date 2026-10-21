@@ -22,7 +22,7 @@ jobs:
     - name: Setup Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24.2'
+        go-version: '1.27.2'
 
     - name: Run Tests
       uses: nick-fields/retry@v3
