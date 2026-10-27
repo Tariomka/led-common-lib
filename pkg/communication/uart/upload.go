@@ -11,8 +11,9 @@ const (
 	ShowAddress = 0x0800B000
 	// ShowCapacity is the size of the cube's show region.
 	ShowCapacity = 160000
-	// RecordSize is the most data bytes sent in one record.
-	RecordSize = 128
+	// RecordSize is the most data bytes sent in one record. The cube drains its 128-byte UART RX
+	// buffer about every 10 ms, so a frame (RecordSize + 13 bytes) must stay well below that.
+	RecordSize = 64
 
 	msgConnect = 17
 	msgReady   = 16

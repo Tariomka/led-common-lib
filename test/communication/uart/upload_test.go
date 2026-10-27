@@ -135,7 +135,7 @@ func TestUpload(t *testing.T) {
 		// Assert
 		assert.Equal(t, uart.UploadDone, upload.State())
 		assert.Equal(t, data, cube.flash[:len(data)])
-		assert.Equal(t, []uint16{0, 1, 2, 3, 3, 4, 5, 6, 7}, cube.lines)
+		assert.Equal(t, []uint16{0, 1, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, cube.lines)
 	})
 
 	t.Run("WhenReplyIsLostTwice", func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestUpload(t *testing.T) {
 		// Assert
 		assert.Equal(t, uart.UploadFailed, upload.State())
 		assert.ErrorIs(t, upload.Err(), common.ErrUploadTimeout)
-		assert.Equal(t, 128, upload.Acked())
+		assert.Equal(t, uart.RecordSize, upload.Acked())
 		assert.Zero(t, cube.ends)
 	})
 
